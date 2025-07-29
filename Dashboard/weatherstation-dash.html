@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MQTT Web App</title>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f4f4; }
+    nav { background: #333; padding: 1em; display: flex; gap: 1em; }
+    nav a { color: white; text-decoration: none; font-weight: bold; }
+    .page { display: none; padding: 2em; }
+    .active { display: block; }
+    .status-dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-left: 0.5em; }
+    .green { background: green; }
+    .red { background: red; }
+    .dashboard-cards { display: flex; flex-wrap: wrap; gap: 1em; justify-content: center; margin-top: 2em; }
+    .data-box {
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 10px;
+      padding: 1.5em;
+      flex: 1 1 250px;
+      max-width: 300px;
+      text-align: center;
+    }
+    .data-box h3 {
+      margin: 0.5em 0;
+      font-size: 1.2em;
+    }
+    .data-box span {
+      font-size: 1.5em;
+      font-weight: bold;
+    }
+    .icon {
+      font-size: 2.5em;
+      display: block;
+      margin-bottom: 0.5em;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+</head>
+<body>
+  <nav>
+    <a href="#" onclick="showPage('dashboard')">Dashboard</a>
+    <a href="#" onclick="showPage('historical'); loadHistoricalData();">Historical Data</a>
+    <a href="#" onclick="showPage('settings')">Settings</a>
+  </nav>
+
+  <div id="dashboard" class="page active">
+    <h2>Dashboard</h2>
+    <button onclick="connectMQTT()">Connect</button>
+    <span class="status-dot red" id="statusDot"></span>
+    <p id="errorMsg" style="color: red;"></p>
+    <div class="dashboard-cards">
+      <div class="data-box">
+        <span class="material-icons icon">thermostat</span>
+        <h3>Temperature</h3>
+        <span id="tempData">--</span>
+      </div>
+      <div class="data-box">
+        <span class="material-icons icon">water_drop</span>
+        <h3>Humidity</h3>
+        <span id="humidityData">--</span>
+      </div>
+      <div class="data-box">
+        <span class="material-icons icon">speed</span>
+        <h3>Pressure</h3>
+        <span id="pressureData">--</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="historical" class="page">
+    <h2>Historical Data</h2>
+    <canvas id="historyChart" width="800" height="400"></canvas>
+  </div>
+
+  <div id="settings" class="page">
+    <h2>Settings</h2>
+    <label>MQTT Broker IP: <input type="text" id="brokerIp"></label><br /><br />
+    <label>MQTT Broker Port: <input type="text" id="brokerPort" value="8080"></label><br /><br />
+    <label>Temperature Topic: <input type="text" id="tempTopic"></label><br /><br />
+    <label>Humidity Topic: <input type="text" id="humidityTopic"></label><br /><br />
+    <label>Pressure Topic: <input type="text" id="pressureTopic"></label><br /><br />
+    <h3>Database Settings</h3>
+    <label>DB Server IP: <input type="text" id="dbIp"></label><br /><br />
+    <label>DB Port: <input type="text" id="dbPort"></label><br /><br />
+    <label>Username: <input type="text" id="dbUser"></label><br /><br />
+    <label>Password: <input type="password" id="dbPass"></label><br /><br />
+    <label>Database: <input type="text" id="dbName"></label><br /><br />
+    <button onclick="saveSettings()">Save Settings</button>
+  </div>
+
+  <script>
+    let client = null;
+    let settings = {
+      brokerIp: '', brokerPort: '8080', tempTopic: '', humidityTopic: '', pressureTopic: '',
+      dbIp: '', dbPort: '', dbUser: '', dbPass: '', dbName: ''
+    };
+
+    function showPage(id) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function saveSettings() {
+      settings.brokerIp = document.getElementById('brokerIp').value;
+      settings.brokerPort = document.getElementById('brokerPort').value;
+      settings.tempTopic = document.getElementById('tempTopic').value;
+      settings.humidityTopic = document.getElementById('humidityTopic').value;
+      settings.pressureTopic = document.getElementById('pressureTopic').value;
+      settings.dbIp = document.getElementById('dbIp').value;
+      settings.dbPort = document.getElementById('dbPort').value;
+      settings.dbUser = document.getElementById('dbUser').value;
+      settings.dbPass = document.getElementById('dbPass').value;
+      settings.dbName = document.getElementById('dbName').value;
+      localStorage.setItem('mqttSettings', JSON.stringify(settings));
+      alert('Settings saved. Connecting...');
+      connectMQTT();
+    }
+
+    function loadSettings() {
+      const stored = localStorage.getItem('mqttSettings');
+      if (stored) {
+        settings = JSON.parse(stored);
+        document.getElementById('brokerIp').value = settings.brokerIp;
+        document.getElementById('brokerPort').value = settings.brokerPort;
+        document.getElementById('tempTopic').value = settings.tempTopic;
+        document.getElementById('humidityTopic').value = settings.humidityTopic;
+        document.getElementById('pressureTopic').value = settings.pressureTopic;
+        document.getElementById('dbIp').value = settings.dbIp;
+        document.getElementById('dbPort').value = settings.dbPort;
+        document.getElementById('dbUser').value = settings.dbUser;
+        document.getElementById('dbPass').value = settings.dbPass;
+        document.getElementById('dbName').value = settings.dbName;
+        connectMQTT();
+      }
+    }
+
+
+
+    async function loadHistoricalData() {
+      const res = await fetch(`http://localhost/mqttdash/historical.php`);
+      const data = await res.json();
+      const labels = data.map(d => d.timestamp);
+      const temp = data.map(d => d.temperature);
+      const hum = data.map(d => d.humidity);
+      const pres = data.map(d => d.pressure);
+      new Chart(document.getElementById('historyChart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Temperature', data: temp, borderColor: 'red', fill: false },
+            { label: 'Humidity', data: hum, borderColor: 'blue', fill: false },
+            { label: 'Pressure', data: pres, borderColor: 'green', fill: false },
+          ]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { x: { display: true }, y: { display: true } } }
+      });
+    }
+
+    function connectMQTT() {
+      if (!settings.brokerIp || !settings.tempTopic || !settings.humidityTopic || !settings.pressureTopic) {
+        document.getElementById('errorMsg').innerText = 'Please configure all settings first.';
+        return;
+      }
+
+      if (client && client.isConnected()) {
+        client.disconnect();
+      }
+
+      const clientId = 'client-' + Math.random().toString(36).substr(2, 9);
+      client = new Paho.MQTT.Client(settings.brokerIp, parseInt(settings.brokerPort), '/mqtt', clientId);
+
+      client.onConnectionLost = (responseObject) => {
+        document.getElementById('statusDot').className = 'status-dot red';
+        if (responseObject.errorCode !== 0) {
+          document.getElementById('errorMsg').innerText = 'Connection lost: ' + responseObject.errorMessage;
+        }
+      };
+
+      client.onMessageArrived = (message) => {
+        if (message.destinationName === settings.tempTopic) {
+          document.getElementById('tempData').innerText = message.payloadString;
+        } else if (message.destinationName === settings.humidityTopic) {
+          document.getElementById('humidityData').innerText = message.payloadString;
+        } else if (message.destinationName === settings.pressureTopic) {
+          document.getElementById('pressureData').innerText = message.payloadString;
+        }
+      };
+
+      client.connect({
+        useSSL: true,
+        onSuccess: () => {
+          document.getElementById('statusDot').className = 'status-dot green';
+          document.getElementById('errorMsg').innerText = '';
+          client.subscribe(settings.tempTopic);
+          client.subscribe(settings.humidityTopic);
+          client.subscribe(settings.pressureTopic);
+        },
+        onFailure: (err) => {
+          document.getElementById('errorMsg').innerText = 'Connection failed: ' + err.errorMessage;
+        }
+      });
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>
